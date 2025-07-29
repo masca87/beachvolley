@@ -17,15 +17,27 @@
     // =============================================
     const GITHUB_USERNAME = "masca87";  // Es: "mario-rossi"
     const REPO_NAME = "beachvolley";          // Es: "beach-volley-scheduler"
-   let GITHUB_TOKEN = localStorage.getItem('github_token');
+  let GITHUB_TOKEN = localStorage.getItem('github_token') || "";
+
 if(!GITHUB_TOKEN) {
   GITHUB_TOKEN = prompt("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");
-  localStorage.setItem('github_token', GITHUB_TOKEN);
+  if(GITHUB_TOKEN) {
+    localStorage.setItem('github_token', GITHUB_TOKEN);
+    location.reload(); // Ricarica la pagina
+  } else {
+    alert("Token necessario per funzionare!");
+  }
 }
 
     // =============================================
     // PARTE 2: CODICE MODIFICATO (DA QUI IN GIÙ NON TOCCARE)
     // =============================================
+  const data = await response.json();
+if(!data || !data.content) {
+  showToast("Errore nel caricamento dei dati");
+  return [];
+}
+let remoteEvents = JSON.parse(atob(data.content));
     let user = JSON.parse(localStorage.getItem('user'));
     let events = [];
 
