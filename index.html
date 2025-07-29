@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beach Volley Scheduler</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f7f7f7; }
+        header { background: #ff9800; color: white; padding: 10px; text-align: center; }
+        .container { padding: 20px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+        .day { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }
+        button { background: #ff9800; color: white; border: none; padding: 5px; margin: 2px; cursor: pointer; border-radius: 4px; }
+        button:hover { background: #e68a00; }
+        input[type="text"] { width: 90%; margin: 3px 0; padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
+        .guest-names { margin-top: 5px; text-align: left; font-size: 0.9em; }
+        .guest-names input { width: 100%; margin-bottom: 3px; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Beach Volley Scheduler</h1>
+</header>
+<div id="login" style="padding:20px; display:none;">
+    <h3>Inserisci i tuoi dati</h3>
+    <input type="text" id="name" placeholder="Nome"><br><br>
+    <input type="tel" id="phone" placeholder="Telefono"><br><br>
+    <button onclick="saveUser()">Salva</button>
+</div>
+<div id="main" style="display:none;">
+    <h3 style="padding-left:20px;">Calendario prossime 2 settimane</h3>
+    <div class="container" id="eventsGrid"></div>
+</div>
+<script>
+    let user = JSON.parse(localStorage.getItem('user'));
+
+    function saveUser() {
+        const name = document.getElementById('name').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        if (name && phone) {
+            user = { name, phone };
+            localStorage.setItem('user', JSON.stringify(user));
+            showMain();
+        } else {
+            alert('Inserisci nome e telefono');
+        }
+    }
+
+    function showMain() {
+        document.getElementById('login').style.display = 'none';
+        document.getElementById('main').style.display = 'block';
+        loadEvents();
+    }
+
+    if (user) {
+        showMain();
+    } else {
+        document.getElementById('login').style.display = 'block';
+    }
+
+    // Load or initialize events for the next 14 days
+    function loadEvents() {
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        let events = JSON.parse(localStorage.getItem('events')) || [];
+        // Remove past events
+        events = events.filter(e => new Date(e.date) >= today);
+        // Ensure 14 days coverage
+        for (let i = 0; i < 14; i++) {
+            const day = new Date(today);
+            day.setDate(today.getDate() + i);
+            let event = events.find(e => new Date(e.date).toDateString() === day.toDateString());
+            if (!event) {
+                event = { id: Date.now() + i, date: day.toISOString(), place: '', participants: [] };
+                events.push(event);
+            }
+        }
+        localStorage.setItem('events', JSON.stringify(events));
+        renderGrid(events);
+    }
+
+    // Render the calendar grid
+    function renderGrid(events) {
+        const grid = document.getElementById('eventsGrid');
+        grid.innerHTML = '';
+        events.sort((a,b) => new Date(a.date) - new Date(b.date));
+        for (const event of events) {
+            const day = new Date(event.date);
+            const total = event.participants.reduce((acc, p) => acc + 1 + (p.guests ? p.guests.length : 0), 0);
+            const div = document.createElement('div');
+            div.className = 'day';
+
+            // Create container for guest name inputs if user is joined and added guests
+            let guestInputsHtml = '';
+            const existingParticipant = event.participants.find(p => p.phone === user.phone);
+            if (existingParticipant && existingParticipant.guests && existingParticipant.guests.length > 0) {
+                for(let i=0; i < existingParticipant.guests.length; i++) {
+                    const guestName = existingParticipant.guests[i] || '';
+                    guestInputsHtml += `<input type="text" placeholder="Nome +${i+1}" value="${guestName.replace(/\"/g, '&quot;')}" onchange="updateGuestName(${event.id}, '${user.phone}', ${i}, this.value)" />`;
+                }
+            }
+
+            div.innerHTML = `
+                <strong>${day.toLocaleDateString()}</strong><br>
+                <input type="text" placeholder="Luogo" value="${event.place.replace(/\"/g, '&quot;')}" onchange="updatePlace(${event.id}, this.value)"><br>
+                <p>Iscritti: ${total}</p>
+                <button onclick="toggleParticipation(${event.id}, 0)">${existingParticipant ? 'Rimuovi' : 'Partecipo'}</button>
+                <button onclick="addGuests(${event.id}, 1)" ${existingParticipant ? '' : 'disabled'}>+1</button>
+                <button onclick="addGuests(${event.id}, 2)" ${existingParticipant ? '' : 'disabled'}>+2</button>
+                <div class="guest-names">${guestInputsHtml}</div>
+                <div style="margin-top:5px; text-align:left; font-size:0.9em;">
+                    ${event.participants.map(p => p.name + (p.guests && p.guests.length > 0 ? ' (+' + p.guests.length + ')' : '')).join('<br>')}
+                </div>
+            `;
+            grid.appendChild(div);
+        }
+    }
+
+    // Update the place of event
+    function updatePlace(id, value) {
+        let events = JSON.parse(localStorage.getItem('events')) || [];
+        const event = events.find(e => e.id === id);
+        if (event) {
+            event.place = value;
+            localStorage.setItem('events', JSON.stringify(events));
+        }
+    }
+
+    // Toggle user participation (remove if already joined, else add)
+    function toggleParticipation(id, plus) {
+        let events = JSON.parse(localStorage.getItem('events')) || [];
+        const event = events.find(e => e.id === id);
+        if (!event) return;
+        const existing = event.participants.find(p => p.phone === user.phone);
+        if (existing) {
+            // Remove participant and guests
+            event.participants = event.participants.filter(p => p.phone !== user.phone);
+        } else {
+            // Add user with empty guests array
+            event.participants.push({ name: user.name, phone: user.phone, guests: [] });
+        }
+        localStorage.setItem('events', JSON.stringify(events));
+        loadEvents();
+    }
+
+    // Add guests (+1 or +2)
+    function addGuests(id, count) {
+        let events = JSON.parse(localStorage.getItem('events')) || [];
+        const event = events.find(e => e.id === id);
+        if (!event) return;
+        const participant = event.participants.find(p => p.phone === user.phone);
+        if (!participant) {
+            alert('Devi prima partecipare per aggiungere amici');
+            return;
+        }
+        // Resize guest array
+        participant.guests = participant.guests || [];
+        if (participant.guests.length === count) return; // no change
+        if (participant.guests.length > count) {
+            participant.guests.length = count; // truncate
+        } else {
+            while (participant.guests.length < count) participant.guests.push('');
+        }
+        localStorage.setItem('events', JSON.stringify(events));
+        loadEvents();
+    }
+
+    // Update guest name in the input field
+    function updateGuestName(eventId, phone, guestIndex, name) {
+        let events = JSON.parse(localStorage.getItem('events')) || [];
+        const event = events.find(e => e.id === eventId);
+        if (!event) return;
+        const participant = event.participants.find(p => p.phone === phone);
+        if (!participant) return;
+        participant.guests[guestIndex] = name.trim();
+        localStorage.setItem('events', JSON.stringify(events));
+    }
+</script>
+</body>
+</html>
