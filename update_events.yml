@@ -1,0 +1,24 @@
+name: Update Events JSON
+
+on:
+  repository_dispatch:
+    types: [update_events]
+
+jobs:
+  update-file:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Decode and save events
+      env:
+        JSON_PAYLOAD: ${{ github.event.client_payload.events_data }}
+        FILE_PATH: events.json
+      run: |
+        echo "$JSON_PAYLOAD" | base64 -d > $FILE_PATH
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add $FILE_PATH
+        git commit -m "Aggiornamento eventi tramite webapp [skip ci]" || echo "No changes to commit"
+        git push
