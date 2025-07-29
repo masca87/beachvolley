@@ -17,7 +17,11 @@
     // =============================================
     const GITHUB_USERNAME = "masca87";  // Es: "mario-rossi"
     const REPO_NAME = "beachvolley";          // Es: "beach-volley-scheduler"
-    const GITHUB_TOKEN = "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";        // Es: "ghp_zxKj3f..."
+   let GITHUB_TOKEN = localStorage.getItem('github_token');
+if(!GITHUB_TOKEN) {
+  GITHUB_TOKEN = prompt("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");
+  localStorage.setItem('github_token', GITHUB_TOKEN);
+}
 
     // =============================================
     // PARTE 2: CODICE MODIFICATO (DA QUI IN GIÙ NON TOCCARE)
