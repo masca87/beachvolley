@@ -8,7 +8,7 @@
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f7f7f7; }
         header { background: #ff9800; color: white; padding: 10px; text-align: center; }
         .container { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-        .day { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba[0,0,0,0.1); text-align: center; }
+        .day { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }
         button { background: #ff9800; color: white; border: none; padding: 5px; margin: 2px; cursor: pointer; border-radius: 4px; }
         button:hover { background: #e68a00; }
         input[type="text"], input[type="tel"] { width: 90%; margin: 3px 0; padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
@@ -57,40 +57,11 @@
     const GITHUB_USERNAME = "masca87";
     const REPO_NAME = "beachvolley";
 
-    // ATTENZIONE: IL TOKEN GITHUB NON DEVE ESSERE QUI.
-    // Useremo un PAT con scope 'repo' per attivare GitHub Actions,
-    // ma solo per lo sviluppo/test. In produzione, questo è un problema.
-    // Per deploy su GitHub Pages con write, il PAT DEV'ESSERE DEL REPO STESSO O UN TOKEN TEMPORANEO DI GITHUB APP.
-    // Dato che ci hai fornito un token, lo useremo temporaneamente in una variabile globale,
-    // ma ricorda che esporre un token con permessi di scrittura è un rischio di sicurezza.
-    // PER LA SOLUZIONE RACCOMANDATA CON GITHUB ACTIONS, QUESTO TOKEN NON SERVE PIÙ NEL CODICE CLIENT-SIDE.
-    // Sarà richiesto solo per triggerare l'Action tramite la REST API (se lo fai da uno script esterno),
-    // ma non dalla pagina HTML stessa.
-    //
-    // Dato che stai usando GITHUB PAGES, l'unica opzione sicura per la scrittura è un backend dedicato
-    // oppure, per questo caso specifico di modifica di un file nel repo, GitHub Actions come "backend serverless".
-    //
-    // Quindi, per la tua app su GitHub Pages, LA CANCELLAZIONE DEL TOKEN DAL JS DEL CLIENT È FONDAMENTALE.
-    // Il token che mi hai dato (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) è un Personal Access Token.
-    // NON USARLO NEL CODICE HTML/JS CLIENT-SIDE PER LE OPERAZIONI DI SCRITTURA.
-    // Servirà per creare un repository_dispatch event, ma non dalla pagina HTML.
-    // Ci serve un token con il permesso "repo".
-
-    // Inizialmente avevi una logica per chiedere e salvare il token:
-    // let GITHUB_TOKEN = localStorage.getItem('github_token');
-    // if (!GITHUB_TOKEN) { /* ... prompt e alert ... */ }
-    // QUESTA LOGICA NON VA PIÙ BENE PER SCRIVERE SUL REPO DA GITHUB PAGES.
-    // PER LEGGERE I DATI, POTREMMO CONTINUARE A USARE L'API DI GITHUB SENZA TOKEN (LIMITATA A 60 RICHIESTE/ORA)
-    // O UN TOKEN PER SOLA LETTURA, MA PER SCRIVERE SERVE IL GITHUB ACTIONS.
-
-    // Per la lettura, useremo l'API di GitHub senza token per semplicità, accettando i limiti.
-    // Per la scrittura, useremo l'API repository_dispatch, che richiede un PAT valido.
-    // Questo PAT non sarà gestito direttamente nel browser, ma assumeremo che esista per la chiamata POST.
-    // Per testare il salvataggio dovrai usare curl o Postman per inviare l'evento repository_dispatch
-    // oppure creare un'altra GitHub Action che lo triggeri.
-    //
-    // Per semplificare al massimo e far funzionare le cose da GitHub Pages, il salvataggio sarà gestito
-    // ATTIVANDO UN GITHUB ACTION. La pagina HTML non salverà direttamente.
+    // ****** ATTENZIONE: TOKEN GITHUB ESPOSTO NEL CODICE CLIENT-SIDE ******
+    // Questo rende il token visibile a chiunque ispezioni la pagina.
+    // Usalo solo per test o per scopi non critici con un token temporaneo e revocabile.
+    // Revoca questo token immediatamente dopo l'uso o quando non è più necessario.
+    const GITHUB_TOKEN = "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"; // Il tuo token fornito
 
     // Variabili globali
     let user = JSON.parse(localStorage.getItem('user'));
@@ -148,19 +119,25 @@
             const today = new Date();
             today.setHours(0,0,0,0);
 
-            // Usiamo l'API REST di GitHub per i contenuti raw del file.
-            // Questo bypassa il limite di 60 richieste/ora se non si usa un token,
-            // ed è più stabile per file JSON.
-            const rawUrl = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/main/events.json`;
-            const response = await fetch(rawUrl);
+            // Per la lettura, useremo l'API dei contenuti di GitHub per ottenere il SHA
+            // e anche per caricare il contenuto.
+            const response = await fetch(
+                `https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/contents/events.json`,
+                {
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`, // Usiamo il token anche per leggere
+                        'Accept': 'application/vnd.github.v3.raw' // Chiediamo il contenuto raw direttamente
+                    }
+                }
+            );
 
             if (!response.ok) {
-                // Se il file non esiste, o c'è un errore, gestiamo
                 if (response.status === 404) {
                     console.warn("File events.json non trovato, creando un array vuoto.");
                     events = []; // Inizializza con un array vuoto se il file non esiste
                 } else {
-                    throw new Error(`Errore HTTP ${response.status}: ${response.statusText}`);
+                    const errorData = await response.json();
+                    throw new Error(`Errore HTTP ${response.status}: ${errorData.message || response.statusText}`);
                 }
             } else {
                 // Se la risposta è OK, tenta di parsare il JSON
@@ -191,96 +168,83 @@
             console.error("Errore nel caricamento degli eventi:", error);
             events = JSON.parse(localStorage.getItem('events')) || [];
             renderGrid(events);
-            showToast(`Connessione fallita al file remoto: ${error.message || 'Controlla la connessione o l\'esistenza del file events.json.'}`);
+            showToast(`Connessione fallita: ${error.message || 'Controlla il token GitHub e la connessione.'}`);
         } finally {
             loadingIndicator.style.display = 'none';
         }
     }
 
-    // NUOVA FUNZIONE DI SALVATAGGIO: Attiva un GitHub Action
+    // Funzione di salvataggio modificata per usare il PAT direttamente per la scrittura
     async function saveEvents() {
-        showToast('Invio dati in corso...');
+        showToast('Salvataggio dati su GitHub...');
         const loadingIndicator = document.getElementById('loading-indicator');
         loadingIndicator.textContent = "Salvataggio in corso...";
         loadingIndicator.style.display = 'block';
 
         try {
-            // Per attivare un repository_dispatch event, hai bisogno di un Personal Access Token
-            // con permesso 'repo'. Questo TOKEN NON DEVE ESSERE NEL CODICE JAVASCRIPT CLIENT-SIDE.
-            // Dovrai configurare un modo sicuro per inviare questo POST request,
-            // ad esempio, da un tuo serverino o un'altra GitHub Action, o manualmente per test.
-            //
-            // Per farti vedere il codice funzionante, userò il token che mi hai fornito qui,
-            // MA SOTTOLINEO FORTEMENTE CHE QUESTO È UN RISCHIO DI SICUREZZA MAGGIORE
-            // E NON DEVE MAI ESSERE FATTO IN PRODUZIONE.
-            //
-            // L'ideale sarebbe avere un server backend che espone un endpoint sicuro,
-            // e la tua app front-end chiama il tuo backend, che a sua volta chiama GitHub.
-            // Oppure, come detto, GitHub Actions triggherato esternamente.
+            // STEP 1: Ottieni l'SHA corrente del file events.json
+            const getResponse = await fetch(
+                `https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/contents/events.json`,
+                {
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                }
+            );
 
-            // Dato che siamo su GitHub Pages, e non possiamo esporre il token,
-            // NON POSSIAMO FARE IL REPOSITORY_DISPATCH DIRETTAMENTE DAL BROWSER IN MODO SICURO.
-            //
-            // Quindi, la funzionalità di salvataggio *diretto* dalla pagina web non è fattibile
-            // in modo semplice e sicuro con GitHub come unico backend.
-            //
-            // L'unica opzione "senza backend" sarebbe che l'utente stesso dovesse inserire il token
-            // ogni volta per fare il push, cosa impraticabile.
+            if (!getResponse.ok) {
+                 // Se il file non esiste (404), procediamo senza SHA (creeremo il file)
+                if (getResponse.status === 404) {
+                    console.log("File events.json non trovato, verrà creato.");
+                    // Non settiamo sha, la richiesta PUT lo creerà.
+                } else {
+                    const errorData = await getResponse.json();
+                    throw new Error(`Errore GET SHA: ${getResponse.status} - ${errorData.message || getResponse.statusText}`);
+                }
+            }
 
-            // PER ORA, IL SALVATAGGIO SU GITHUB NON FUNZIONERÀ DA QUESTO CODICE CLIENT-SIDE.
-            // La funzione saveEvents() simulerà il successo ma in realtà salverà solo localmente.
-            // Se vuoi un salvataggio reale, dovrai implementare un backend o un processo esterno
-            // che usi il GitHub Action.
+            let sha = null;
+            if (getResponse.ok) { // Se la richiesta GET è andata a buon fine, estrai l'SHA
+                const fileData = await getResponse.json();
+                sha = fileData.sha;
+            }
 
-            // DEBUGGING: Simula il successo del salvataggio
-            console.log("Simulando salvataggio su GitHub. I dati effettivi non vengono inviati per motivi di sicurezza/CORS.");
-            localStorage.setItem('events', JSON.stringify(events)); // Salva localmente per persistenza sessione
-            showToast('Dati salvati LOCALMENTE (salvataggio remoto richiede backend).');
+            // STEP 2: Aggiorna (o crea) il file con il nuovo contenuto
+            const updateResponse = await fetch(
+                `https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/contents/events.json`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: 'Aggiornamento eventi beach volley dalla webapp', // Messaggio di commit
+                        content: btoa(JSON.stringify(events)), // Dati degli eventi codificati in base64
+                        sha: sha // L'SHA è richiesto per gli aggiornamenti, non per la creazione
+                    })
+                }
+            );
+
+            if (!updateResponse.ok) {
+                const errorData = await updateResponse.json();
+                throw new Error(`Salvataggio fallito: ${updateResponse.status} - ${errorData.message || updateResponse.statusText}`);
+            }
+
+            localStorage.setItem('events', JSON.stringify(events)); // Salva anche localmente per consistenza
+            showToast('Dati salvati con successo su GitHub!');
             return true;
 
-            /*
-            // CODICE PER IL VERO SALVATAGGIO TRAMITE REPOSITORY_DISPATCH (Richiede un TOKEN Github con scope 'repo'
-            // che NON DEVE ESSERE IN QUESTO FILE JS PER SICUREZZA IN PROD.
-            // Questo PAT dovrebbe essere gestito da un backend o da un'altra CI/CD pipeline).
-
-            // const MY_GITHUB_TOKEN = "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"; // Non farlo in produzione!
-
-            // const response = await fetch(`https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/dispatches`, {
-            //     method: 'POST',
-            //     headers: {
-            //         'Accept': 'application/vnd.github.v3+json',
-            //         'Authorization': `token ${MY_GITHUB_TOKEN}`, // Token problematico qui
-            //         'Content-Type': 'application/json'
-            //     },
-            //     body: JSON.stringify({
-            //         event_type: 'update_events',
-            //         client_payload: {
-            //             events_data: btoa(JSON.stringify(events)) // Dati degli eventi codificati in base64
-            //         }
-            //     })
-            // });
-
-            // if (!response.ok) {
-            //     const errorData = await response.json();
-            //     throw new Error(`Errore nell'attivazione del workflow: ${response.status} - ${errorData.message || response.statusText}`);
-            // }
-
-            // console.log("Workflow GitHub Actions attivato con successo.");
-            // localStorage.setItem('events', JSON.stringify(events));
-            // showToast('Richiesta di aggiornamento inviata (ci vorrà qualche secondo per l\'aggiornamento).');
-            // return true;
-            */
-
         } catch (error) {
-            console.error("Errore nel tentativo di salvataggio:", error);
-            showToast(`Salvataggio remoto fallito: ${error.message}. Salvato solo localmente.`);
+            console.error("Errore nel salvataggio degli eventi:", error);
+            showToast(`Salvataggio fallito su GitHub: ${error.message}.`);
             return false;
         } finally {
             loadingIndicator.style.display = 'none';
-            loadingIndicator.textContent = "Caricamento dati..."; // Resetta il testo
+            loadingIndicator.textContent = "Caricamento dati...";
         }
     }
-
 
     function renderGrid(events) {
         const grid = document.getElementById('eventsGrid');
@@ -357,7 +321,7 @@
         if (event) {
             event.place = value;
             const success = await saveEvents();
-            if (success) showToast('Luogo aggiornato (solo localmente)'); // Modificato il messaggio
+            if (success) showToast('Luogo aggiornato su GitHub');
         }
     }
 
@@ -374,7 +338,8 @@
             event.participants.splice(existingIndex, 1);
             const success = await saveEvents();
             if (success) {
-                showToast('Partecipazione rimossa (solo localmente)'); // Modificato il messaggio
+                showToast('Partecipazione rimossa da GitHub');
+                // Ricarica la griglia per aggiornare i pulsanti e la lista
                 loadEvents();
             }
         } else {
@@ -385,7 +350,8 @@
             });
             const success = await saveEvents();
             if (success) {
-                showToast('Partecipazione registrata (solo localmente)'); // Modificato il messaggio
+                showToast('Partecipazione registrata su GitHub');
+                // Ricarica la griglia per aggiornare i pulsanti e la lista
                 loadEvents();
             }
         }
@@ -418,8 +384,8 @@
 
         const success = await saveEvents();
         if (success) {
-            showToast(`Aggiornati a ${count} ospiti (solo localmente)`); // Modificato il messaggio
-            loadEvents();
+            showToast(`Aggiornati a ${count} ospiti su GitHub`);
+            loadEvents(); // Ricarica per aggiornare l'interfaccia con i nuovi input
         }
     }
 
@@ -431,11 +397,11 @@
         if (!participant || !participant.guests) return;
 
         participant.guests[guestIndex] = name.trim();
-        await saveEvents(); // Questo salverà localmente.
+        await saveEvents(); // Questo salverà su GitHub.
     }
 
     // Polling per aggiornamenti automatici (ogni 30 secondi)
-    // Questo caricherà i dati da GitHub, ma non salverà i tuoi cambiamenti se non c'è un backend.
+    // Questo caricherà i dati da GitHub, inclusi i cambiamenti fatti da altri.
     setInterval(refreshData, 30000);
 </script>
 </body>
