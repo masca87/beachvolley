@@ -7,13 +7,26 @@
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f7f7f7; }
         header { background: #ff9800; color: white; padding: 10px; text-align: center; }
-        .container { padding: 20px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+        .container { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
         .day { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }
         button { background: #ff9800; color: white; border: none; padding: 5px; margin: 2px; cursor: pointer; border-radius: 4px; }
         button:hover { background: #e68a00; }
-        input[type="text"] { width: 90%; margin: 3px 0; padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
+        input[type="text"], input[type="tel"] { width: 90%; margin: 3px 0; padding: 5px; border-radius: 4px; border: 1px solid #ccc; }
         .guest-names { margin-top: 5px; text-align: left; font-size: 0.9em; }
         .guest-names input { width: 100%; margin-bottom: 3px; }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4CAF50;
+            color: white;
+            padding: 12px;
+            border-radius: 4px;
+            z-index: 1000;
+            display: none;
+        }
+        .participant-list { margin-top: 10px; text-align: left; font-size: 0.9em; }
     </style>
 </head>
 <body>
@@ -22,27 +35,47 @@
 </header>
 <div id="login" style="padding:20px; display:none;">
     <h3>Inserisci i tuoi dati</h3>
-    <input type="text" id="name" placeholder="Nome"><br><br>
-    <input type="tel" id="phone" placeholder="Telefono"><br><br>
+    <input type="text" id="name" placeholder="Nome" required><br><br>
+    <input type="tel" id="phone" placeholder="Telefono" required><br><br>
     <button onclick="saveUser()">Salva</button>
 </div>
 <div id="main" style="display:none;">
-    <h3 style="padding-left:20px;">Calendario prossime 2 settimane</h3>
+    <div style="padding: 0 20px; display: flex; justify-content: space-between; align-items: center;">
+        <h3>Calendario prossime 2 settimane</h3>
+        <button onclick="refreshData()">Aggiorna</button>
+    </div>
     <div class="container" id="eventsGrid"></div>
 </div>
+<div id="toast" class="toast"></div>
 <script>
     let user = JSON.parse(localStorage.getItem('user'));
+    let events = [];
+
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
+    }
 
     function saveUser() {
         const name = document.getElementById('name').value.trim();
         const phone = document.getElementById('phone').value.trim();
-        if (name && phone) {
-            user = { name, phone };
-            localStorage.setItem('user', JSON.stringify(user));
-            showMain();
-        } else {
-            alert('Inserisci nome e telefono');
+        
+        if (!name || !phone) {
+            showToast('Inserisci nome e telefono');
+            return;
         }
+        
+        if (!/^[0-9+ ]+$/.test(phone)) {
+            showToast('Numero di telefono non valido');
+            return;
+        }
+
+        user = { name, phone };
+        localStorage.setItem('user', JSON.stringify(user));
+        showMain();
+        showToast('Dati salvati con successo');
     }
 
     function showMain() {
@@ -51,129 +84,256 @@
         loadEvents();
     }
 
+    function refreshData() {
+        loadEvents();
+        showToast('Dati aggiornati');
+    }
+
     if (user) {
         showMain();
     } else {
         document.getElementById('login').style.display = 'block';
     }
 
-    // Load or initialize events for the next 14 days
-    function loadEvents() {
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        let events = JSON.parse(localStorage.getItem('events')) || [];
-        // Remove past events
-        events = events.filter(e => new Date(e.date) >= today);
-        // Ensure 14 days coverage
-        for (let i = 0; i < 14; i++) {
-            const day = new Date(today);
-            day.setDate(today.getDate() + i);
-            let event = events.find(e => new Date(e.date).toDateString() === day.toDateString());
-            if (!event) {
-                event = { id: Date.now() + i, date: day.toISOString(), place: '', participants: [] };
-                events.push(event);
+    // Carica gli eventi dalle API di GitHub
+    async function loadEvents() {
+        try {
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            
+            // Carica gli eventi esistenti dal repository GitHub
+            const response = await fetch('https://api.github.com/repos/tu-username/tu-repo/contents/events.json');
+            const data = await response.json();
+            let remoteEvents = JSON.parse(atob(data.content));
+            
+            // Carica anche gli eventi locali (per retrocompatibilità)
+            let localEvents = JSON.parse(localStorage.getItem('events')) || [];
+            
+            // Unisci gli eventi, dando priorità a quelli remoti
+            events = [...remoteEvents];
+            
+            // Assicurati di avere 14 giorni di copertura
+            for (let i = 0; i < 14; i++) {
+                const day = new Date(today);
+                day.setDate(today.getDate() + i);
+                const dayStr = day.toISOString().split('T')[0];
+                
+                if (!events.some(e => e.date.startsWith(dayStr))) {
+                    events.push({ 
+                        id: Date.now() + i, 
+                        date: day.toISOString(), 
+                        place: '', 
+                        participants: [] 
+                    });
+                }
             }
+            
+            // Filtra eventi passati e ordina
+            events = events.filter(e => new Date(e.date) >= today)
+                          .sort((a,b) => new Date(a.date) - new Date(b.date));
+            
+            renderGrid(events);
+        } catch (error) {
+            console.error("Errore nel caricamento degli eventi:", error);
+            // Fallback agli eventi locali
+            events = JSON.parse(localStorage.getItem('events')) || [];
+            renderGrid(events);
+            showToast('Connessione fallita, usando dati locali');
         }
-        localStorage.setItem('events', JSON.stringify(events));
-        renderGrid(events);
     }
 
-    // Render the calendar grid
+    // Salva gli eventi sia localmente che su GitHub
+    async function saveEvents() {
+        try {
+            // Salva localmente
+            localStorage.setItem('events', JSON.stringify(events));
+            
+            // Salva su GitHub (richiede un token con permessi repo)
+            const token = 'tu-token-personale'; // Sostituisci con un token valido
+            const response = await fetch('https://api.github.com/repos/tu-username/tu-repo/contents/events.json', {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: 'Aggiornamento eventi beach volley',
+                    content: btoa(JSON.stringify(events)),
+                    sha: await getFileSHA()
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Salvataggio su GitHub fallito');
+            }
+            
+            return true;
+        } catch (error) {
+            console.error("Errore nel salvataggio degli eventi:", error);
+            return false;
+        }
+    }
+
+    // Ottieni SHA del file esistente per l'aggiornamento
+    async function getFileSHA() {
+        try {
+            const response = await fetch('https://api.github.com/repos/tu-username/tu-repo/contents/events.json');
+            const data = await response.json();
+            return data.sha;
+        } catch {
+            return null;
+        }
+    }
+
+    // Renderizza la griglia del calendario
     function renderGrid(events) {
         const grid = document.getElementById('eventsGrid');
         grid.innerHTML = '';
-        events.sort((a,b) => new Date(a.date) - new Date(b.date));
+        
+        const dateFormatter = new Intl.DateTimeFormat('it-IT', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'numeric'
+        });
+
         for (const event of events) {
             const day = new Date(event.date);
             const total = event.participants.reduce((acc, p) => acc + 1 + (p.guests ? p.guests.length : 0), 0);
             const div = document.createElement('div');
             div.className = 'day';
 
-            // Create container for guest name inputs if user is joined and added guests
+            const existingParticipant = event.participants.find(p => p.phone === user?.phone);
             let guestInputsHtml = '';
-            const existingParticipant = event.participants.find(p => p.phone === user.phone);
-            if (existingParticipant && existingParticipant.guests && existingParticipant.guests.length > 0) {
-                for(let i=0; i < existingParticipant.guests.length; i++) {
+            
+            if (existingParticipant?.guests?.length > 0) {
+                for(let i = 0; i < existingParticipant.guests.length; i++) {
                     const guestName = existingParticipant.guests[i] || '';
-                    guestInputsHtml += `<input type="text" placeholder="Nome +${i+1}" value="${guestName.replace(/\"/g, '&quot;')}" onchange="updateGuestName(${event.id}, '${user.phone}', ${i}, this.value)" />`;
+                    guestInputsHtml += `
+                        <input type="text" 
+                               placeholder="Nome +${i+1}" 
+                               value="${escapeHtml(guestName)}" 
+                               onchange="updateGuestName(${event.id}, '${escapeHtml(user.phone)}', ${i}, this.value)" />
+                    `;
                 }
             }
 
             div.innerHTML = `
-                <strong>${day.toLocaleDateString()}</strong><br>
-                <input type="text" placeholder="Luogo" value="${event.place.replace(/\"/g, '&quot;')}" onchange="updatePlace(${event.id}, this.value)"><br>
+                <strong>${dateFormatter.format(day)}</strong><br>
+                <input type="text" 
+                       placeholder="Luogo" 
+                       value="${escapeHtml(event.place || '')}" 
+                       onchange="updatePlace(${event.id}, this.value)"><br>
                 <p>Iscritti: ${total}</p>
-                <button onclick="toggleParticipation(${event.id}, 0)">${existingParticipant ? 'Rimuovi' : 'Partecipo'}</button>
-                <button onclick="addGuests(${event.id}, 1)" ${existingParticipant ? '' : 'disabled'}>+1</button>
-                <button onclick="addGuests(${event.id}, 2)" ${existingParticipant ? '' : 'disabled'}>+2</button>
+                <button onclick="toggleParticipation(${event.id})">
+                    ${existingParticipant ? 'Rimuovi' : 'Partecipo'}
+                </button>
+                <button onclick="addGuests(${event.id}, 1)" ${!existingParticipant ? 'disabled' : ''}>
+                    +1
+                </button>
+                <button onclick="addGuests(${event.id}, 2)" ${!existingParticipant ? 'disabled' : ''}>
+                    +2
+                </button>
                 <div class="guest-names">${guestInputsHtml}</div>
-                <div style="margin-top:5px; text-align:left; font-size:0.9em;">
-                    ${event.participants.map(p => p.name + (p.guests && p.guests.length > 0 ? ' (+' + p.guests.length + ')' : '')).join('<br>')}
+                <div class="participant-list">
+                    ${event.participants.length > 0 ? 
+                       event.participants.map(p => 
+                           `${escapeHtml(p.name)}${p.guests?.length > 0 ? ` (+${p.guests.length})` : ''}`
+                       ).join('<br>') : 
+                       'Nessun partecipante'}
                 </div>
             `;
             grid.appendChild(div);
         }
     }
 
-    // Update the place of event
-    function updatePlace(id, value) {
-        let events = JSON.parse(localStorage.getItem('events')) || [];
+    // Funzione per evitare XSS
+    function escapeHtml(str) {
+        return str.toString()
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    // Aggiorna il luogo dell'evento
+    async function updatePlace(id, value) {
         const event = events.find(e => e.id === id);
         if (event) {
             event.place = value;
-            localStorage.setItem('events', JSON.stringify(events));
+            await saveEvents();
+            showToast('Luogo aggiornato');
         }
     }
 
-    // Toggle user participation (remove if already joined, else add)
-    function toggleParticipation(id, plus) {
-        let events = JSON.parse(localStorage.getItem('events')) || [];
+    // Aggiungi/Rimuovi partecipazione
+    async function toggleParticipation(id) {
         const event = events.find(e => e.id === id);
-        if (!event) return;
-        const existing = event.participants.find(p => p.phone === user.phone);
-        if (existing) {
-            // Remove participant and guests
-            event.participants = event.participants.filter(p => p.phone !== user.phone);
+        if (!event || !user) return;
+        
+        const existingIndex = event.participants.findIndex(p => p.phone === user.phone);
+        
+        if (existingIndex >= 0) {
+            if (!confirm('Sei sicuro di voler rimuovere la tua partecipazione?')) {
+                return;
+            }
+            event.participants.splice(existingIndex, 1);
+            showToast('Partecipazione rimossa');
         } else {
-            // Add user with empty guests array
-            event.participants.push({ name: user.name, phone: user.phone, guests: [] });
+            event.participants.push({ 
+                name: user.name, 
+                phone: user.phone, 
+                guests: [] 
+            });
+            showToast('Partecipazione registrata');
         }
-        localStorage.setItem('events', JSON.stringify(events));
+        
+        await saveEvents();
         loadEvents();
     }
 
-    // Add guests (+1 or +2)
-    function addGuests(id, count) {
-        let events = JSON.parse(localStorage.getItem('events')) || [];
+    // Aggiungi ospiti
+    async function addGuests(id, count) {
         const event = events.find(e => e.id === id);
-        if (!event) return;
+        if (!event || !user) return;
+        
         const participant = event.participants.find(p => p.phone === user.phone);
         if (!participant) {
-            alert('Devi prima partecipare per aggiungere amici');
+            showToast('Devi prima partecipare per aggiungere amici');
             return;
         }
-        // Resize guest array
+        
         participant.guests = participant.guests || [];
-        if (participant.guests.length === count) return; // no change
+        
+        if (participant.guests.length === count) return;
+        
         if (participant.guests.length > count) {
-            participant.guests.length = count; // truncate
+            participant.guests.length = count;
         } else {
-            while (participant.guests.length < count) participant.guests.push('');
+            while (participant.guests.length < count) {
+                participant.guests.push('');
+            }
         }
-        localStorage.setItem('events', JSON.stringify(events));
+        
+        await saveEvents();
         loadEvents();
+        showToast(`Aggiunti ${count} ospiti`);
     }
 
-    // Update guest name in the input field
-    function updateGuestName(eventId, phone, guestIndex, name) {
-        let events = JSON.parse(localStorage.getItem('events')) || [];
+    // Aggiorna nome ospite
+    async function updateGuestName(eventId, phone, guestIndex, name) {
         const event = events.find(e => e.id === eventId);
         if (!event) return;
+        
         const participant = event.participants.find(p => p.phone === phone);
-        if (!participant) return;
+        if (!participant || !participant.guests) return;
+        
         participant.guests[guestIndex] = name.trim();
-        localStorage.setItem('events', JSON.stringify(events));
+        await saveEvents();
     }
+
+    // Polling per aggiornamenti automatici (ogni 30 secondi)
+    setInterval(refreshData, 30000);
 </script>
 </body>
 </html>
