@@ -1,118 +1,119 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Calendario Partite</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beach Volley</title>
   <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    .login, .calendar { max-width: 600px; margin: auto; }
-    .day-grid {
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f0f0f0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+    .login {
+      margin-bottom: 2rem;
+    }
+    .calendar {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 0.5rem;
-      margin-top: 1rem;
+      gap: 10px;
     }
     .day {
-      border: 1px solid #aaa;
-      padding: 0.5rem;
+      background: white;
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: center;
       border-radius: 5px;
-      cursor: pointer;
-      min-height: 80px;
-      background: #f9f9f9;
     }
-    .day:hover { background: #eee; }
-    .participants { font-size: 0.85rem; margin-top: 0.5rem; }
-    .hidden { display: none; }
+    .participants {
+      font-size: 0.9rem;
+      margin-top: 5px;
+    }
+    .btn {
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
+  <div class="container">
+    <div class="login">
+      <h2>Accedi</h2>
+      <input type="text" id="name" placeholder="Nome" />
+      <input type="text" id="phone" placeholder="Numero di telefono" />
+      <button onclick="login()">Entra</button>
+    </div>
+    <div id="calendar"></div>
+  </div>
 
-<div class="login">
-  <h2>Benvenuto</h2>
-  <input type="text" id="name" placeholder="Il tuo nome"><br><br>
-  <input type="text" id="phone" placeholder="Numero di telefono"><br><br>
-  <button onclick="enter()">Entra</button>
-</div>
+  <script>
+    let currentUser = null;
+    const MIN_PLAYERS = 4;
 
-<div class="calendar hidden">
-  <h2>Calendario prossime 2 settimane</h2>
-  <div class="day-grid" id="calendar"></div>
-</div>
-
-<script>
-  const today = new Date();
-  const calendarDiv = document.getElementById('calendar');
-  const user = { name: '', phone: '' };
-
-  function formatDate(date) {
-    return date.toISOString().split('T')[0];
-  }
-
-  function loadDays() {
-    calendarDiv.innerHTML = '';
-    const events = JSON.parse(localStorage.getItem('events') || '{}');
-
-    for (let i = 0; i < 14; i++) {
-      const date = new Date();
-      date.setDate(today.getDate() + i);
-      const key = formatDate(date);
-
-      if (!events[key]) events[key] = [];
-
-      const div = document.createElement('div');
-      div.className = 'day';
-      div.innerHTML = `<strong>${key}</strong><div class="participants">${events[key].length} iscritti</div>`;
-      div.onclick = () => handleDayClick(key, events);
-
-      calendarDiv.appendChild(div);
+    function login() {
+      const name = document.getElementById("name").value;
+      const phone = document.getElementById("phone").value;
+      if (!name || !phone) return alert("Inserisci nome e numero");
+      currentUser = { name, phone };
+      document.querySelector(".login").style.display = "none";
+      loadCalendar();
     }
 
-    localStorage.setItem('events', JSON.stringify(events));
-  }
-
-  function handleDayClick(date, events) {
-    if (events[date].some(e => e.phone === user.phone)) {
-      alert("Hai già partecipato a questo giorno.");
-      return;
+    function generateDates() {
+      const days = [];
+      const now = new Date();
+      for (let i = 0; i < 14; i++) {
+        const day = new Date(now);
+        day.setDate(day.getDate() + i);
+        const key = day.toISOString().split("T")[0];
+        days.push({ key, label: day.toLocaleDateString(), participants: [] });
+      }
+      return days;
     }
 
-    const plus = prompt("Vuoi aggiungere +1 o +2? (scrivi 0, 1 o 2)");
-    const plusInt = Math.min(2, Math.max(0, parseInt(plus)));
-    const guests = [];
+    function loadCalendar() {
+      const calendar = document.getElementById("calendar");
+      calendar.innerHTML = "<h2>Calendario</h2><div class='calendar' id='days'></div>";
+      const daysContainer = document.getElementById("days");
+      const days = generateDates();
 
-    for (let i = 0; i < plusInt; i++) {
-      const gname = prompt(`Nome del tuo +${i+1}`);
-      if (gname) guests.push(gname);
+      days.forEach((day) => {
+        const div = document.createElement("div");
+        div.className = "day";
+        const count = day.participants.length;
+        div.innerHTML = `
+          <strong>${day.label}</strong><br>
+          <div class="participants">Giocatori: ${count}</div>
+          <button class="btn" onclick='joinDay("${day.key}", 1)'>Partecipa</button>
+          <button class="btn" onclick='joinDay("${day.key}", 2)'>+1</button>
+          <button class="btn" onclick='joinDay("${day.key}", 3)'>+2</button>
+        `;
+        daysContainer.appendChild(div);
+      });
     }
 
-    events[date].push({ name: user.name, phone: user.phone, guests });
-    localStorage.setItem('events', JSON.stringify(events));
-    loadDays();
+    const joined = new Set();
 
-    if (events[date].length >= 4) {
-      alert("🎉 Giorno con almeno 4 partecipanti! (notifica da implementare)");
+    function joinDay(date, count) {
+      if (joined.has(date)) {
+        alert("Hai già confermato la tua presenza.");
+        return;
+      }
+      const others = [];
+      for (let i = 1; i < count; i++) {
+        const name = prompt(`Nome del +${i}`);
+        if (name) others.push(name);
+      }
+      alert(`Ti sei iscritto per il ${date}. Totale partecipanti: ${count}`);
+      joined.add(date);
+      // Qui potresti inviare i dati a un backend o a un file JSON se servisse.
+      // Inoltre, se count >= MIN_PLAYERS, potresti generare una notifica push.
     }
-  }
-
-  function enter() {
-    const name = document.getElementById('name').value.trim();
-    const phone = document.getElementById('phone').value.trim();
-
-    if (!name || !phone) {
-      alert("Compila entrambi i campi");
-      return;
-    }
-
-    user.name = name;
-    user.phone = phone;
-
-    document.querySelector('.login').classList.add('hidden');
-    document.querySelector('.calendar').classList.remove('hidden');
-    loadDays();
-  }
-</script>
-
+  </script>
 </body>
 </html>
-
